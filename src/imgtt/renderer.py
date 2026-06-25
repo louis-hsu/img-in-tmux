@@ -101,9 +101,14 @@ def render_iterm_passthrough(
     inner = header + b64 + _BEL
     # tmux passthrough: ESC Ptmux; <payload, every ESC doubled> ESC \
     wrapped = _ESC + b"Ptmux;" + inner.replace(_ESC, _ESC + _ESC) + _ESC + b"\\"
+    # tmux cannot see the passthrough image, so its cursor stays put and the
+    # caller's info text would print over the image. Emit a tmux-visible
+    # cursor-down (CUD) of the image's cell height so following text lands below
+    # it. preserveAspectRatio means the image is at most `rows` cells tall.
+    advance = f"\x1b[{rows}B\r".encode("ascii")
     if log:
         log(f"iterm passthrough: {len(data)} img bytes -> {len(wrapped)} wrapped, {cols}x{rows} cells")
-    sys.stdout.buffer.write(wrapped)
+    sys.stdout.buffer.write(wrapped + advance)
     sys.stdout.buffer.flush()
     return 0
 

@@ -158,7 +158,7 @@ def test_iterm_passthrough_sequence_shape(tmp_path: Path):
     wrapped = buf.write.call_args[0][0]
     # tmux passthrough envelope
     assert wrapped.startswith(b"\x1bPtmux;")
-    assert wrapped.endswith(b"\x1b\\")
+    assert b"\x1b\\" in wrapped  # envelope close
     # inner OSC 1337, ESC doubled inside the envelope
     assert b"\x1b\x1b]1337;File=inline=1" in wrapped
     assert b"size=5" in wrapped
@@ -168,6 +168,8 @@ def test_iterm_passthrough_sequence_shape(tmp_path: Path):
     assert base64.b64encode(b"hello") in wrapped
     # BEL terminator of the OSC
     assert b"\x07" in wrapped
+    # cursor moved below the image (height in cells) so info text lands under it
+    assert wrapped.endswith(b"\x1b[5B\r")
 
 
 def test_render_image_dispatches_to_iterm_pt(tmp_path: Path):
