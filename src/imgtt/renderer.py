@@ -41,9 +41,13 @@ def _sixel_max_bytes() -> int:
     return _DEFAULT_SIXEL_MAX_BYTES
 
 
-def resolve_format(in_tmux: bool, fmt: str | None) -> str:
+def resolve_format(in_tmux: bool, fmt: str | None, in_popup: bool = False) -> str:
     if fmt:
         return fmt
+    # tmux popups cannot display sixel (the overlay is drawn separately from the
+    # pane grid where images live) — symbols is the only thing that renders.
+    if in_tmux and in_popup:
+        return "symbols"
     # In tmux, native sixel survives redraws (verified). Outside, "auto" tells
     # imgtt to omit --format so chafa picks the best protocol for the terminal.
     return "sixels" if in_tmux else "auto"
@@ -105,9 +109,10 @@ def render_image(
     rows: int,
     in_tmux: bool = False,
     fmt: str | None = None,
+    in_popup: bool = False,
     log: Callable[[str], None] | None = None,
 ) -> int:
-    resolved = resolve_format(in_tmux, fmt)
+    resolved = resolve_format(in_tmux, fmt, in_popup)
     # tmux sixel: capture bytes and enforce the payload ceiling by shrinking.
     if in_tmux and resolved in _SIXEL_FORMATS:
         return _render_sixel_capped(path, cols, rows, resolved, log)

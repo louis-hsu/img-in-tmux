@@ -1,10 +1,9 @@
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import TextIO
 
-from imgtt.dimensions import get_terminal_size
+from imgtt.dimensions import detect_size
 from imgtt.metadata import get_metadata
 from imgtt.renderer import (
     check_chafa,
@@ -73,19 +72,23 @@ def main() -> None:
         elif args.debug:
             debug_out = sys.stderr
 
-        in_tmux = "TMUX" in os.environ
-        term_cols, term_rows = get_terminal_size()
+        size = detect_size()
+        in_tmux = size.in_tmux
+        in_popup = size.in_popup
+        term_cols, term_rows = size.cols, size.rows
 
         if args.size_probe:
             print(f"terminal: {term_cols}x{term_rows}")
+            print(f"source: {size.source}")
             print(f"tmux: {'yes' if in_tmux else 'no'}")
+            print(f"popup: {'yes' if in_popup else 'no'}")
             return
 
         if args.file is None:
             parser.error("file is required")
 
-        _dbg(f"tmux detected: {'yes' if in_tmux else 'no'}", debug_out)
-        _dbg(f"pane size: {term_cols}x{term_rows}", debug_out)
+        _dbg(f"tmux detected: {'yes' if in_tmux else 'no'} (popup={'yes' if in_popup else 'no'})", debug_out)
+        _dbg(f"pane size: {term_cols}x{term_rows} (source={size.source})", debug_out)
 
         img_cols = max(1, int(term_cols * args.size / 100))
         img_rows = max(1, int(term_rows * args.size / 100))
@@ -113,14 +116,15 @@ def main() -> None:
         _dbg(f"exif found: {'yes' if exif else 'no'} ({len(exif)} fields)", debug_out)
 
         if not args.info_only:
-            resolved = resolve_format(in_tmux, args.format)
-            _dbg(f"format: {resolved} (tmux={in_tmux}, override={args.format})", debug_out)
+            resolved = resolve_format(in_tmux, args.format, in_popup)
+            _dbg(f"format: {resolved} (tmux={in_tmux}, popup={in_popup}, override={args.format})", debug_out)
             chafa_exit = render_image(
                 args.file,
                 img_cols,
                 img_rows,
                 in_tmux=in_tmux,
                 fmt=args.format,
+                in_popup=in_popup,
                 log=(lambda m: _dbg(m, debug_out)) if debug_out is not None else None,
             )
             _dbg(f"chafa exit: {chafa_exit}", debug_out)

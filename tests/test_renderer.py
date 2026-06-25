@@ -89,6 +89,30 @@ def test_resolve_format():
     assert resolve_format(in_tmux=False, fmt="iterm") == "iterm"
 
 
+def test_resolve_format_popup_forces_symbols():
+    # tmux popup cannot display sixel -> default to symbols
+    assert resolve_format(in_tmux=True, fmt=None, in_popup=True) == "symbols"
+    # explicit override still wins (user's escape hatch)
+    assert resolve_format(in_tmux=True, fmt="iterm", in_popup=True) == "iterm"
+    # popup flag irrelevant outside tmux
+    assert resolve_format(in_tmux=False, fmt=None, in_popup=True) == "auto"
+
+
+def test_render_in_popup_uses_symbols_not_sixel(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("IMGTT_SIXEL_MAX_BYTES", raising=False)
+    fake_img = tmp_path / "test.jpg"
+    fake_img.write_bytes(b"fake")
+    mock = MagicMock(returncode=0)
+    with patch("subprocess.run", return_value=mock) as mock_run:
+        render_image(fake_img, cols=56, rows=16, in_tmux=True, in_popup=True)
+    cmd = mock_run.call_args[0][0]
+    # symbols path: direct passthrough, no capture, font-ratio applied
+    assert "--format=symbols" in cmd
+    assert "--format=sixels" not in cmd
+    assert "--font-ratio=1/2" in cmd
+    assert mock_run.call_args.kwargs.get("stdout") is None
+
+
 def test_sixel_max_bytes_default(monkeypatch):
     monkeypatch.delenv("IMGTT_SIXEL_MAX_BYTES", raising=False)
     assert _sixel_max_bytes() == 1_300_000
