@@ -1,9 +1,13 @@
+import base64
 import os
 import shutil
 import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+
+_ESC = b"\x1b"
+_BEL = b"\x07"
 
 
 def check_chafa() -> bool:
@@ -41,16 +45,67 @@ def _sixel_max_bytes() -> int:
     return _DEFAULT_SIXEL_MAX_BYTES
 
 
-def resolve_format(in_tmux: bool, fmt: str | None, in_popup: bool = False) -> str:
+def resolve_format(
+    in_tmux: bool,
+    fmt: str | None,
+    in_popup: bool = False,
+    underlying_iterm: bool = False,
+    in_fzf: bool = False,
+    passthrough: bool = False,
+) -> str:
+    """Pick a render mode. Returns a chafa format name, "auto" (no --format),
+    or "iterm_pt" (our own iTerm2 inline-image emitter over tmux passthrough)."""
     if fmt:
+        # Honor explicit override. In tmux with passthrough available, route an
+        # iterm request through our own emitter so it actually survives tmux
+        # (chafa's passthrough wrapping is unreliable under redirected stdio).
+        if fmt == "iterm" and in_tmux and passthrough:
+            return "iterm_pt"
         return fmt
-    # tmux popups cannot display sixel (the overlay is drawn separately from the
-    # pane grid where images live) — symbols is the only thing that renders.
+    # tmux popups cannot display any graphics (the overlay is drawn separately
+    # from the pane grid where images live) — symbols is the only thing visible.
     if in_tmux and in_popup:
         return "symbols"
+    # High-quality path: in a tmux fzf preview on iTerm2 we emit the native
+    # truecolor inline-image protocol via passthrough. Gated to fzf because the
+    # preview re-runs on each move, re-drawing the (untracked) passthrough image;
+    # a one-shot invocation would be cleared on the next tmux redraw.
+    if in_tmux and underlying_iterm and passthrough and in_fzf:
+        return "iterm_pt"
     # In tmux, native sixel survives redraws (verified). Outside, "auto" tells
     # imgtt to omit --format so chafa picks the best protocol for the terminal.
     return "sixels" if in_tmux else "auto"
+
+
+def render_iterm_passthrough(
+    path: Path, cols: int, rows: int, log: Callable[[str], None] | None = None
+) -> int:
+    """Emit the iTerm2 inline-image protocol wrapped in tmux passthrough.
+
+    Sends the original file bytes (base64) so iTerm2 decodes at native
+    resolution and truecolor — matching yazi's quality, unlike palette-limited
+    sixel. tmux does not store passthrough output, so there is no payload byte
+    ceiling, but it is also not redrawn by tmux (see resolve_format gating).
+    """
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        if log:
+            log(f"iterm read failed: {exc}")
+        return 1
+    b64 = base64.b64encode(data)
+    header = (
+        f"\x1b]1337;File=inline=1;size={len(data)};"
+        f"width={cols};height={rows};preserveAspectRatio=1:"
+    ).encode("ascii")
+    inner = header + b64 + _BEL
+    # tmux passthrough: ESC Ptmux; <payload, every ESC doubled> ESC \
+    wrapped = _ESC + b"Ptmux;" + inner.replace(_ESC, _ESC + _ESC) + _ESC + b"\\"
+    if log:
+        log(f"iterm passthrough: {len(data)} img bytes -> {len(wrapped)} wrapped, {cols}x{rows} cells")
+    sys.stdout.buffer.write(wrapped)
+    sys.stdout.buffer.flush()
+    return 0
 
 
 def _build_cmd(path: Path, cols: int, rows: int, resolved: str) -> list[str]:
@@ -110,9 +165,15 @@ def render_image(
     in_tmux: bool = False,
     fmt: str | None = None,
     in_popup: bool = False,
+    underlying_iterm: bool = False,
+    in_fzf: bool = False,
+    passthrough: bool = False,
     log: Callable[[str], None] | None = None,
 ) -> int:
-    resolved = resolve_format(in_tmux, fmt, in_popup)
+    resolved = resolve_format(in_tmux, fmt, in_popup, underlying_iterm, in_fzf, passthrough)
+    # High-quality native iTerm2 inline image (truecolor, full res) over tmux.
+    if resolved == "iterm_pt":
+        return render_iterm_passthrough(path, cols, rows, log)
     # tmux sixel: capture bytes and enforce the payload ceiling by shrinking.
     if in_tmux and resolved in _SIXEL_FORMATS:
         return _render_sixel_capped(path, cols, rows, resolved, log)

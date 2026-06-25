@@ -1,7 +1,12 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from imgtt import dimensions
-from imgtt.dimensions import detect_size, get_terminal_size
+from imgtt.dimensions import (
+    detect_size,
+    get_terminal_size,
+    tmux_passthrough_on,
+    underlying_iterm,
+)
 
 
 def _patch(monkeypatch, *, tmux=False, fzf=None, pty=None, pane=None):
@@ -89,3 +94,34 @@ def test_fzf_preview_size_bad_env(monkeypatch):
 def test_tmux_pane_size_none_outside_tmux(monkeypatch):
     monkeypatch.delenv("TMUX", raising=False)
     assert dimensions._tmux_pane_size() is None
+
+
+def test_underlying_iterm_true(monkeypatch):
+    monkeypatch.setenv("LC_TERMINAL", "iTerm2")
+    assert underlying_iterm() is True
+
+
+def test_underlying_iterm_false(monkeypatch):
+    monkeypatch.setenv("LC_TERMINAL", "WezTerm")
+    assert underlying_iterm() is False
+    monkeypatch.delenv("LC_TERMINAL", raising=False)
+    assert underlying_iterm() is False
+
+
+def test_passthrough_off_outside_tmux(monkeypatch):
+    monkeypatch.delenv("TMUX", raising=False)
+    assert tmux_passthrough_on() is False
+
+
+def test_passthrough_on(monkeypatch):
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+    mock = MagicMock(returncode=0, stdout="on\n")
+    with patch("subprocess.run", return_value=mock):
+        assert tmux_passthrough_on() is True
+
+
+def test_passthrough_off_when_disabled(monkeypatch):
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+    mock = MagicMock(returncode=0, stdout="off\n")
+    with patch("subprocess.run", return_value=mock):
+        assert tmux_passthrough_on() is False

@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,7 @@ from imgtt.renderer import (
     check_chafa,
     format_info,
     render_image,
+    render_iterm_passthrough,
     resolve_format,
 )
 
@@ -96,6 +98,92 @@ def test_resolve_format_popup_forces_symbols():
     assert resolve_format(in_tmux=True, fmt="iterm", in_popup=True) == "iterm"
     # popup flag irrelevant outside tmux
     assert resolve_format(in_tmux=False, fmt=None, in_popup=True) == "auto"
+
+
+def test_resolve_format_iterm_pt_in_fzf_on_iterm():
+    # tmux fzf preview + iTerm2 + passthrough -> native iterm path
+    assert (
+        resolve_format(in_tmux=True, fmt=None, underlying_iterm=True, in_fzf=True, passthrough=True)
+        == "iterm_pt"
+    )
+
+
+def test_resolve_format_no_iterm_pt_without_fzf():
+    # same but not fzf -> stays sixel (one-shot would be clobbered)
+    assert (
+        resolve_format(in_tmux=True, fmt=None, underlying_iterm=True, in_fzf=False, passthrough=True)
+        == "sixels"
+    )
+
+
+def test_resolve_format_no_iterm_pt_without_passthrough():
+    assert (
+        resolve_format(in_tmux=True, fmt=None, underlying_iterm=True, in_fzf=True, passthrough=False)
+        == "sixels"
+    )
+
+
+def test_resolve_format_no_iterm_pt_outside_tmux():
+    assert (
+        resolve_format(in_tmux=False, fmt=None, underlying_iterm=True, in_fzf=True, passthrough=True)
+        == "auto"
+    )
+
+
+def test_resolve_format_popup_beats_iterm_pt():
+    # popup shows no graphics at all -> symbols even on iTerm2 fzf
+    assert (
+        resolve_format(
+            in_tmux=True, fmt=None, in_popup=True, underlying_iterm=True, in_fzf=True, passthrough=True
+        )
+        == "symbols"
+    )
+
+
+def test_resolve_format_override_iterm_routes_to_pt():
+    # explicit --format=iterm in tmux with passthrough -> our emitter
+    assert resolve_format(in_tmux=True, fmt="iterm", passthrough=True) == "iterm_pt"
+    # without passthrough, plain chafa iterm
+    assert resolve_format(in_tmux=True, fmt="iterm", passthrough=False) == "iterm"
+
+
+def test_iterm_passthrough_sequence_shape(tmp_path: Path):
+    img = tmp_path / "x.jpg"
+    img.write_bytes(b"hello")
+    buf = MagicMock()
+    with patch("imgtt.renderer.sys.stdout") as stdout:
+        stdout.buffer = buf
+        rc = render_iterm_passthrough(img, cols=10, rows=5)
+    assert rc == 0
+    wrapped = buf.write.call_args[0][0]
+    # tmux passthrough envelope
+    assert wrapped.startswith(b"\x1bPtmux;")
+    assert wrapped.endswith(b"\x1b\\")
+    # inner OSC 1337, ESC doubled inside the envelope
+    assert b"\x1b\x1b]1337;File=inline=1" in wrapped
+    assert b"size=5" in wrapped
+    assert b"width=10;height=5" in wrapped
+    assert b"preserveAspectRatio=1" in wrapped
+    # original bytes carried as base64 (native decode by iTerm2)
+    assert base64.b64encode(b"hello") in wrapped
+    # BEL terminator of the OSC
+    assert b"\x07" in wrapped
+
+
+def test_render_image_dispatches_to_iterm_pt(tmp_path: Path):
+    img = tmp_path / "x.jpg"
+    img.write_bytes(b"data")
+    buf = MagicMock()
+    with patch("subprocess.run") as mock_run:
+        with patch("imgtt.renderer.sys.stdout") as stdout:
+            stdout.buffer = buf
+            rc = render_image(
+                img, cols=40, rows=20, in_tmux=True,
+                underlying_iterm=True, in_fzf=True, passthrough=True,
+            )
+    assert rc == 0
+    mock_run.assert_not_called()  # native emitter, not chafa
+    assert buf.write.call_args[0][0].startswith(b"\x1bPtmux;")
 
 
 def test_render_in_popup_uses_symbols_not_sixel(tmp_path: Path, monkeypatch):

@@ -107,3 +107,29 @@ def detect_size() -> TermSize:
 def get_terminal_size() -> tuple[int, int]:
     s = detect_size()
     return s.cols, s.rows
+
+
+def underlying_iterm() -> bool:
+    """Is the real terminal iTerm2? Inside tmux TERM_PROGRAM is "tmux", but
+    iTerm2 sets LC_TERMINAL (passed through tmux) — the reliable signal."""
+    return os.environ.get("LC_TERMINAL", "").lower() == "iterm2"
+
+
+def tmux_passthrough_on() -> bool:
+    """True when tmux's allow-passthrough option is enabled (required to forward
+    graphics sequences to the real terminal)."""
+    if "TMUX" not in os.environ:
+        return False
+    try:
+        result = subprocess.run(
+            ["tmux", "show", "-gv", "allow-passthrough"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            # "on" or "all" both enable passthrough; anything else is off.
+            return result.stdout.strip() in ("on", "all")
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return False

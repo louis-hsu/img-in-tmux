@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
-from imgtt.dimensions import detect_size
+from imgtt.dimensions import detect_size, tmux_passthrough_on, underlying_iterm
 from imgtt.metadata import get_metadata
 from imgtt.renderer import (
     check_chafa,
@@ -75,20 +75,26 @@ def main() -> None:
         size = detect_size()
         in_tmux = size.in_tmux
         in_popup = size.in_popup
+        in_fzf = size.source == "fzf"
         term_cols, term_rows = size.cols, size.rows
+        underlying = underlying_iterm()
+        passthrough = tmux_passthrough_on() if in_tmux else False
 
         if args.size_probe:
             print(f"terminal: {term_cols}x{term_rows}")
             print(f"source: {size.source}")
             print(f"tmux: {'yes' if in_tmux else 'no'}")
             print(f"popup: {'yes' if in_popup else 'no'}")
+            print(f"underlying-term: {'iterm2' if underlying else 'other'}")
+            print(f"passthrough: {'on' if passthrough else 'off'}")
             return
 
         if args.file is None:
             parser.error("file is required")
 
-        _dbg(f"tmux detected: {'yes' if in_tmux else 'no'} (popup={'yes' if in_popup else 'no'})", debug_out)
+        _dbg(f"tmux detected: {'yes' if in_tmux else 'no'} (popup={'yes' if in_popup else 'no'}, fzf={'yes' if in_fzf else 'no'})", debug_out)
         _dbg(f"pane size: {term_cols}x{term_rows} (source={size.source})", debug_out)
+        _dbg(f"underlying-term: {'iterm2' if underlying else 'other'}, passthrough: {'on' if passthrough else 'off'}", debug_out)
 
         img_cols = max(1, int(term_cols * args.size / 100))
         img_rows = max(1, int(term_rows * args.size / 100))
@@ -116,8 +122,8 @@ def main() -> None:
         _dbg(f"exif found: {'yes' if exif else 'no'} ({len(exif)} fields)", debug_out)
 
         if not args.info_only:
-            resolved = resolve_format(in_tmux, args.format, in_popup)
-            _dbg(f"format: {resolved} (tmux={in_tmux}, popup={in_popup}, override={args.format})", debug_out)
+            resolved = resolve_format(in_tmux, args.format, in_popup, underlying, in_fzf, passthrough)
+            _dbg(f"format: {resolved} (tmux={in_tmux}, popup={in_popup}, fzf={in_fzf}, iterm={underlying}, override={args.format})", debug_out)
             chafa_exit = render_image(
                 args.file,
                 img_cols,
@@ -125,6 +131,9 @@ def main() -> None:
                 in_tmux=in_tmux,
                 fmt=args.format,
                 in_popup=in_popup,
+                underlying_iterm=underlying,
+                in_fzf=in_fzf,
+                passthrough=passthrough,
                 log=(lambda m: _dbg(m, debug_out)) if debug_out is not None else None,
             )
             _dbg(f"chafa exit: {chafa_exit}", debug_out)
