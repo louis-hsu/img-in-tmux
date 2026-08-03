@@ -24,10 +24,10 @@ Using [uv](https://docs.astral.sh/uv/):
 uv tool install --force --reinstall .
 ```
 
-This installs the `imgtt` executable to `~/.local/bin`. Ensure it is on your `PATH`:
+This installs the `imgtt` executable to `~/.bin`. Ensure it is on your `PATH`:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.bin:$PATH"
 ```
 
 Run without installing:
