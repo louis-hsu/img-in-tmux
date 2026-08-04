@@ -16,6 +16,3 @@ packages = ["src/imgtt"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "pytest-mock>=3.0"]
-
-[tool.uv]
-tool-bin-dir = "~/.bin"
